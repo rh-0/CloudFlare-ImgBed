@@ -430,6 +430,7 @@ async function uploadFileToS3(context, fullId, metadata, returnLink) {
 
 // 上传到Telegram
 async function uploadFileToTelegram(context, fullId, metadata, fileExt, fileName, fileType, returnLink) {
+    console.log("************************* 进入Telegram渠道 ******************************")
     const { env, waitUntil, uploadConfig, url, formdata, specifiedChannelName } = context;
     const db = getDatabase(env);
 
@@ -462,9 +463,11 @@ async function uploadFileToTelegram(context, fullId, metadata, fileExt, fileName
     const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB
 
     if (fileSize > CHUNK_SIZE) {
+        console.log("************************* 进入Telegram渠道, 服务端分片 ******************************")
         // 大文件分片上传
         return await uploadLargeFileToTelegram(context, file, fullId, metadata, fileName, fileType, returnLink, tgBotToken, tgChatId, tgChannel);
     }
+    console.log("************************* 进入Telegram渠道 客户端分片******************************")
 
     // 由于TG会把gif后缀的文件转为视频，所以需要修改后缀名绕过限制
     if (fileExt === 'gif') {

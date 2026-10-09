@@ -12,3 +12,4 @@ node_modules
 .vscode/
 .claude/
 .agents/
+/.idea/
