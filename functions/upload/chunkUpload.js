@@ -85,6 +85,7 @@ export async function initializeChunkedUpload(context) {
 
 // 处理客户端分块上传
 export async function handleChunkUpload(context) {
+    console.log("************* 处理客户端分块上传 *************")
     const { env, request, url, waitUntil } = context;
     const db = getDatabase(env);
 
@@ -135,6 +136,12 @@ export async function handleChunkUpload(context) {
         // 将渠道名称存入 context
         context.specifiedChannelName = channelName;
 
+        // Telegram 直传：不落 KV 暂存分片，省掉写 KV + 读 KV 的序列化开销（Free 套餐 CPU 10ms 限制）
+        if (uploadChannel === 'telegram') {
+            console.log("************* Telegram 直传：不落 KV 暂存分片，省掉写 KV + 读 KV 的序列化开销（Free 套餐 CPU 10ms 限制） *************")
+            return await uploadTelegramChunkDirect(context, chunk, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType);
+        }
+
         // 立即创建分块记录，标记为"uploading"状态
         const chunkKey = `chunk_${uploadId}_${chunkIndex.toString().padStart(3, '0')}`;
         const chunkData = await chunk.arrayBuffer();
@@ -176,6 +183,81 @@ export async function handleChunkUpload(context) {
     } catch (error) {
         return createResponse(`Error: Failed to upload chunk - ${error.message}`, { status: 500 });
     }
+}
+
+// Telegram 分片直传：不落 KV，直接把分片转发给 Telegram，成功后只写小体积的 file_id 记录
+// 失败时不落任何数据，直接返回错误，由前端重传该分片
+async function uploadTelegramChunkDirect(context, chunk, chunkIndex, totalChunks, uploadId, originalFileName, originalFileType) {
+    const { env, uploadConfig, specifiedChannelName } = context;
+    const db = getDatabase(env);
+
+    const tgSettings = uploadConfig.telegram;
+    const tgChannels = tgSettings.channels;
+
+    let tgChannel;
+    if (specifiedChannelName) {
+        tgChannel = tgChannels.find(ch => ch.name === specifiedChannelName);
+    }
+    if (!tgChannel) {
+        tgChannel = selectConsistentChannel(tgChannels, uploadId, tgSettings.loadBalance.enabled);
+    }
+    if (!tgChannel) {
+        return createResponse('Error: No Telegram channel provided', { status: 400 });
+    }
+
+    const chunkFileName = `${originalFileName}.part${chunkIndex.toString().padStart(3, '0')}`;
+
+    const chunkInfo = await uploadChunkToTelegramWithRetry(
+        tgChannel.botToken,
+        tgChannel.chatId,
+        tgChannel.proxyUrl || '',
+        chunk,
+        chunkFileName,
+        chunkIndex,
+        totalChunks,
+        1 // 直传模式失败交给前端重传，服务端不重试以省 CPU
+    );
+
+    if (!chunkInfo || !chunkInfo.file_id) {
+        return createResponse(`Error: Failed to upload chunk ${chunkIndex} to Telegram`, { status: 500 });
+    }
+
+    // 只写 metadata（不含分片数据），供 merge 时收集 file_id
+    const chunkKey = `chunk_${uploadId}_${chunkIndex.toString().padStart(3, '0')}`;
+    await db.put(chunkKey, '', {
+        metadata: {
+            uploadId,
+            chunkIndex,
+            totalChunks,
+            originalFileName,
+            originalFileType,
+            chunkSize: chunk.size,
+            uploadTime: Date.now(),
+            uploadStartTime: Date.now(),
+            status: 'completed',
+            uploadChannel: 'telegram',
+            uploadResult: {
+                success: true,
+                fileId: chunkInfo.file_id,
+                size: chunkInfo.file_size,
+                fileName: chunkFileName,
+                uploadTime: Date.now(),
+                tgChannel: tgChannel.name
+            },
+            completedTime: Date.now()
+        },
+        expirationTtl: 3600
+    });
+
+    return createResponse(JSON.stringify({
+        success: true,
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} uploaded to Telegram`,
+        uploadId,
+        chunkIndex
+    }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+    });
 }
 
 // 处理清理请求
