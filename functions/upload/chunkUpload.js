@@ -54,13 +54,13 @@ export async function initializeChunkedUpload(context) {
             ipAddress,
             status: 'initialized',
             createdAt: timestamp,
-            expiresAt: timestamp + 3600000 // 1小时过期
+            expiresAt: timestamp + 3600000 * 24 * 7 // 7天过期
         };
 
         // 保存会话信息
         const sessionKey = `upload_session_${uploadId}`;
         await db.put(sessionKey, JSON.stringify(sessionInfo), {
-            expirationTtl: 3600 * 24 // 1天过期
+            expirationTtl: 3600 * 24 * 7 // 7天过期
         });
 
         return createResponse(JSON.stringify({
@@ -158,7 +158,7 @@ export async function handleChunkUpload(context) {
         const { usingD1 } = checkDatabaseConfig(env);
         await db.put(chunkKey, usingD1 ? '' : chunkData, {
             metadata: initialChunkMetadata,
-            expirationTtl: 3600 * 24 // 1天过期
+            expirationTtl: 3600 * 24 * 7  // 7天过期
         });
 
         // 同步上传分块到存储端，添加超时保护
@@ -250,7 +250,7 @@ async function uploadChunkToStorageWithTimeout(context, chunkIndex, totalChunks,
                 // 保留原始数据以便重试（D1模式下不保存二进制数据，避免SQLITE_TOOBIG）
                 await db.put(chunkKey, usingD1 ? '' : chunkRecord.value, {
                     metadata: errorMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
             }
         } catch (metaError) {
@@ -312,7 +312,7 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                 // 只保存metadata，不保存原始数据，设置过期时间
                 await db.put(chunkKey, '', {
                     metadata: updatedMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
 
                 console.log(`Chunk ${chunkIndex} uploaded successfully to ${uploadChannel}`);
@@ -331,7 +331,7 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                 const { usingD1: isD1 } = checkDatabaseConfig(env);
                 await db.put(chunkKey, isD1 ? '' : chunkData, {
                     metadata: failedMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
 
                 console.warn(`Chunk ${chunkIndex} upload failed: ${failedMetadata.error}`);
@@ -356,7 +356,7 @@ async function uploadChunkToStorage(context, chunkIndex, totalChunks, uploadId, 
                 // D1模式下不保存二进制数据，避免SQLITE_TOOBIG
                 await db.put(chunkKey, isD1 ? '' : chunkRecord.value, {
                     metadata: errorMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
             }
         } catch (metaError) {
@@ -395,7 +395,7 @@ async function uploadSingleChunkToR2Multipart(context, chunkData, chunkIndex, to
 
             // 保存multipart info
             await db.put(multipartKey, JSON.stringify(multipartInfo), {
-                expirationTtl: 3600 * 24 // 1天过期
+                expirationTtl: 3600 * 24 * 7 // 7天过期
             });
         } else {
             // 其他分块需要等待第一个分块完成multipart upload初始化
@@ -505,7 +505,7 @@ async function uploadSingleChunkToS3Multipart(context, chunkData, chunkIndex, to
 
             // 保存multipart info
             await db.put(multipartKey, JSON.stringify(multipartInfo), {
-                expirationTtl: 3600 * 24 // 1天过期
+                expirationTtl: 3600 * 24 * 7 // 7天过期
             });
         } else {
             // 其他分块需要等待第一个分块完成multipart upload初始化
@@ -871,7 +871,7 @@ async function retrySingleChunk(context, chunk, uploadChannel, maxRetries = 5, r
 
         await db.put(chunk.key, isD1 ? '' : chunkData, {
             metadata: retryMetadata,
-            expirationTtl: 3600 * 24 // 1天过期
+            expirationTtl: 3600 * 24 * 7 // 7天过期
         });
 
         while (retryCount < maxRetries) {
@@ -911,7 +911,7 @@ async function retrySingleChunk(context, chunk, uploadChannel, maxRetries = 5, r
                 // 删除原始数据，只保留上传结果，设置过期时间
                 await db.put(chunk.key, '', {
                     metadata: updatedMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
 
                 console.log(`Chunk ${chunk.index} retry successful after ${retryCount + 1} attempts`);
@@ -942,7 +942,7 @@ async function retrySingleChunk(context, chunk, uploadChannel, maxRetries = 5, r
                 // D1模式下不保存二进制数据，避免SQLITE_TOOBIG
                 await db.put(chunk.key, isD1Retry ? '' : chunkRecord.value, {
                     metadata: failedRetryMetadata,
-                    expirationTtl: 3600 * 24 // 1天过期
+                    expirationTtl: 3600 * 24 * 7 // 7天过期
                 });
             }
         } catch (metaError) {
@@ -1050,7 +1050,7 @@ export async function checkChunkUploadStatuses(env, uploadId, totalChunks) {
                     // D1模式下不保存二进制数据，避免SQLITE_TOOBIG
                     await db.put(chunkKey, isD1Status ? '' : chunkRecord.value, {
                         metadata: timeoutMetadata,
-                        expirationTtl: 3600 * 24 // 1天过期
+                        expirationTtl: 3600 * 24 * 7 // 7天过期
                     }).catch(err => console.warn(`Failed to update timeout status for chunk ${i}:`, err));
                 }
 
