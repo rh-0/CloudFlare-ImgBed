@@ -151,7 +151,7 @@ export async function handleChunkUpload(context) {
             uploadStartTime: uploadStartTime,
             status: 'uploading',
             uploadChannel,
-            timeoutThreshold: uploadStartTime + 60000 // 1分钟超时阈值
+            timeoutThreshold: uploadStartTime + 60000 * 60 * 24 * 7 // 7天超时阈值
         };
 
         // 立即保存分块记录和数据，设置过期时间
